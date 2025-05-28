@@ -80,7 +80,7 @@ Para Rodar no Google Colab:
 1º célula - bibliotecas
 ```bash
 !pip install numpy==1.23.5
-!pip install --upgrade --no-cache-dir mediapipe
+!pip install mediapipe==0.10.9
 !pip install opencv-python-headless
 ```
 
