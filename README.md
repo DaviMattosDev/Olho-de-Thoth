@@ -1,7 +1,7 @@
 ---
 # Olho de Thoth
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/def12415-37a0-4793-8267-4718af7debef" alt="Olho-de-thoth" height='300px' width='250px'>
+  <img src="https://media1.tenor.com/m/DvFsvcuRZC0AAAAd/ra-amun.gif" alt="Olho-de-thoth" height='300px' width='400px'>
 </div>
 
 🧠 "O Olho de Thoth vê além da ilusão."
