@@ -1,229 +1,269 @@
-import cv2
-import numpy as np
-import mediapipe as mp
-import subprocess
+# gui.py
+
+import sys
 import json
-import os
-import requests
-import tensorflow as tf
-from tensorflow.keras.applications import Xception
-from tensorflow.keras.preprocessing import image
-from tensorflow.keras.applications.xception import preprocess_input
-from tensorflow.keras.layers import GlobalAveragePooling2D, Dense
-from tensorflow.keras.models import Model
-import warnings
-warnings.filterwarnings('ignore')
+import re
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QPushButton, QLabel,
+    QTextEdit, QVBoxLayout, QWidget, QFileDialog, QHBoxLayout,
+    QProgressBar
+)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QTextCharFormat, QColor, QSyntaxHighlighter, QTextCursor
 
-# --------------------------
-# Função 1: Extrair frames
-# --------------------------
-def extract_frames(video_path, max_frames=30):
-    cap = cv2.VideoCapture(video_path)
-    frames = []
-    count = 0
-    while cap.isOpened() and count < max_frames:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        frames.append(frame)
-        count += 1
-    cap.release()
-    return frames
 
-# --------------------------
-# Função 2: Detectar faces e piscadas
-# --------------------------
-mp_face_mesh = mp.solutions.face_mesh
+# Destaque de sintaxe para JSON
+class JsonHighlighter(QSyntaxHighlighter):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._brushes = {
+            "key": QTextCharFormat(),
+            "string": QTextCharFormat(),
+            "number": QTextCharFormat(),
+            "boolean": QTextCharFormat(),
+            "bracket": QTextCharFormat(),
+        }
+        self._brushes["key"].setForeground(QColor("#FFD700"))
+        self._brushes["string"].setForeground(QColor("#00FF00"))
+        self._brushes["number"].setForeground(QColor("#1E90FF"))
+        self._brushes["boolean"].setForeground(QColor("#FF6347"))
+        self._brushes["bracket"].setForeground(QColor("#FFFFFF"))
 
-def detect_faces_and_micro(frames):
-    face_issues = 0
-    blink_count = 0
+    def highlightBlock(self, text):
+        patterns = [
+            (r'"[^"]+":', "key"),
+            (r'"[^"]*"', "string"),
+            (r'\b\d+(\.\d+)?\b', "number"),
+            (r'\b(true|false|null)\b', "boolean"),
+            (r'[\{\}\[\]]', "bracket"),
+        ]
+        for pattern, key in patterns:
+            for match in re.finditer(pattern, text):
+                start, end = match.span()
+                self.setFormat(start, end - start, self._brushes[key])
 
-    with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1) as face_mesh:
 
-        for idx, frame in enumerate(frames):
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = face_mesh.process(rgb_frame)
+# Thread para análise em segundo plano
+class AnalysisThread(QThread):
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+    log = pyqtSignal(str)
 
-            if results.multi_face_landmarks is None:
-                face_issues += 1
-            else:
-                landmarks = results.multi_face_landmarks[0].landmark
-                left_eye = [landmarks[i] for i in [386, 385, 380, 374, 368, 387]]
-                right_eye = [landmarks[i] for i in [159, 158, 153, 145, 144, 160]]
+    def __init__(self, video_path, analyze_func):
+        super().__init__()
+        self.video_path = video_path
+        self.analyze_func = analyze_func
 
-                def eye_aspect_ratio(eye):
-                    A = abs(eye[1].y - eye[5].y)
-                    B = abs(eye[2].y - eye[4].y)
-                    C = abs(eye[0].x - eye[3].x)
-                    return (A + B) / (2.0 * C)
+    def run(self):
+        try:
+            result = self.analyze_func(self.video_path, log_callback=lambda msg: self.log.emit(msg))
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
 
-                ear = (eye_aspect_ratio(left_eye) + eye_aspect_ratio(right_eye)) / 2.0
-                if ear < 0.2:
-                    blink_count += 1
 
-    return {"face_issues": face_issues, "blink_count": blink_count}
+# Janela principal da GUI
+class OlhoDeThothGUI(QMainWindow):
+    def __init__(self, analyze_func):
+        super().__init__()
+        self.setWindowTitle("👁️‍🗨️ Olho de Thoth — Detector de Deepfakes")
+        self.setGeometry(100, 100, 1000, 700)
+        self.setStyleSheet("""
+            background-color: #1e1e2f;
+            color: #d9dcd6;
+            font-family: 'Arial';
+        """)
+        self.analyze_func = analyze_func
+        self.analysis_thread = None
+        self.init_ui()
 
-# --------------------------
-# Função 3: Estimar nitidez
-# --------------------------
-def estimate_blurriness(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    fm = cv2.Laplacian(gray, cv2.CV_64F).var()
-    return fm
+    def init_ui(self):
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QVBoxLayout()
 
-# --------------------------
-# Função 4: Jitter entre frames
-# --------------------------
-def detect_frame_jitter(frames):
-    diffs = []
-    for i in range(1, len(frames)):
-        diff = cv2.absdiff(frames[i], frames[i - 1])
-        mean_diff = diff.mean()
-        diffs.append(mean_diff)
-    return diffs
+        title = QLabel("👁️‍🗨️ OLHO DE THOTH")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 32px; font-weight: bold; color: #d291bc;")
+        layout.addWidget(title)
 
-# --------------------------
-# Função 5: FFT (frequência espacial)
-# --------------------------
-def analyze_fft(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    f = np.fft.fft2(gray)
-    fshift = np.fft.fftshift(f)
-    magnitude_spectrum = 20 * np.log(np.abs(fshift))
-    mean_magnitude = np.mean(magnitude_spectrum)
-    return mean_magnitude
+        subtitle = QLabel("Detector Avançado de Deepfakes")
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setStyleSheet("font-size: 18px; color: #aaaaaa;")
+        layout.addWidget(subtitle)
 
-# --------------------------
-# Função 6: Analisar metadados
-# --------------------------
-def analyze_metadata(video_path):
-    cmd = [
-        'ffprobe',
-        '-v', 'quiet',
-        '-print_format', 'json',
-        '-show_format',
-        '-show_streams',
-        video_path
-    ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    try:
-        metadata = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        print("[ERRO] Não foi possível ler os metadados do vídeo.")
-        metadata = {}
-    return metadata
+        btn_layout = QHBoxLayout()
+        self.select_button = QPushButton("📂 Selecionar Vídeo")
+        self.select_button.clicked.connect(self.select_video)
+        self.select_button.setStyleSheet(self.button_style())
+        btn_layout.addWidget(self.select_button)
 
-# --------------------------
-# Função 7: Carregar modelo XceptionNet treinado em deepfakes
-# --------------------------
-def load_xception_model():
-    base_model = Xception(weights='imagenet', include_top=False)
-    x = base_model.output
-    x = GlobalAveragePooling2D()(x)
-    predictions = Dense(2, activation='softmax')(x)
-    model = Model(inputs=base_model.input, outputs=predictions)
-    return model
+        self.analyze_button = QPushButton("🔍 Iniciar Análise")
+        self.analyze_button.clicked.connect(self.start_analysis)
+        self.analyze_button.setEnabled(False)
+        self.analyze_button.setStyleSheet(self.button_style())
+        btn_layout.addWidget(self.analyze_button)
 
-# Simulação de carregamento de pesos
-def download_model_weights(model):
-    print("[INFO] Carregando modelo XceptionNet treinado...")
-    return model
+        layout.addLayout(btn_layout)
 
-# Classificar frame com XceptionNet
-def classify_frame_with_ai(model, frame):
-    img = cv2.resize(frame, (299, 299))
-    img_array = image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0)
-    img_array = preprocess_input(img_array)
-    prediction = model.predict(img_array, verbose=0)
-    fake_prob = prediction[0][1]
-    return fake_prob
+        self.path_label = QLabel("Nenhum vídeo selecionado")
+        self.path_label.setStyleSheet("color: #bbbbbb; margin-top: 5px;")
+        layout.addWidget(self.path_label)
 
-# --------------------------
-# Função 8: Análise final e decisão
-# --------------------------
-def analyze_video(video_path, max_frames=30):
-    print(f"[INFO] Extraindo até {max_frames} frames do vídeo...")
-    frames = extract_frames(video_path, max_frames)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #444;
+                border-radius: 5px;
+                text-align: center;
+                background-color: #2a2a3d;
+                color: white;
+                height: 20px;
+            }
+            QProgressBar::chunk {
+                background-color: #d291bc;
+                width: 20px;
+            }
+        """)
+        layout.addWidget(self.progress_bar)
 
-    print("[INFO] Carregando modelo XceptionNet treinado...")
-    model = load_xception_model()
-    download_model_weights(model)
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setStyleSheet("""
+            background-color: #2a2a3d;
+            color: #e0e0e0;
+            padding: 10px;
+            font-family: Consolas;
+            font-size: 12px;
+            border: 1px solid #444;
+        """)
+        layout.addWidget(self.log_box)
 
-    print("[INFO] Analisando rostos e microcomportamentos...")
-    face_data = detect_faces_and_micro(frames)
+        self.result_box = QTextEdit()
+        self.result_box.setReadOnly(True)
+        self.result_box.setStyleSheet("""
+            background-color: #2a2a3d;
+            color: #e0e0e0;
+            padding: 10px;
+            font-family: Consolas;
+            font-size: 12px;
+            border: 1px solid #444;
+        """)
+        self.highlighter = JsonHighlighter(self.result_box.document())
+        layout.addWidget(self.result_box)
+        self.result_box.hide()
 
-    print("[INFO] Calculando nitidez média dos frames...")
-    blur_scores = [estimate_blurriness(frame) for frame in frames]
-    avg_blur = np.mean(blur_scores)
+        main_widget.setLayout(layout)
 
-    print("[INFO] Analisando tremor entre frames...")
-    jitter_scores = detect_frame_jitter(frames)
-    avg_jitter = np.mean(jitter_scores) if jitter_scores else 0
+    def button_style(self):
+        return """
+            QPushButton {
+                background-color: #5a2a7c;
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 14px;
+                border: 1px solid #9a55ff;
+            }
+            QPushButton:hover {
+                background-color: #7a3a9f;
+            }
+        """
 
-    print("[INFO] Analisando padrões de frequência (FFT)...")
-    fft_scores = [analyze_fft(frame) for frame in frames]
-    avg_fft = np.mean(fft_scores)
+    def select_video(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Selecionar Vídeo",
+            "", "Vídeos (*.mp4 *.avi *.mov *.mkv)"
+        )
+        if path:
+            self.video_path = path
+            self.path_label.setText(path)
+            self.analyze_button.setEnabled(True)
 
-    print("[INFO] Lendo metadados do arquivo...")
-    metadata = analyze_metadata(video_path)
+    def start_analysis(self):
+        if hasattr(self, 'analysis_thread') and self.analysis_thread is not None:
+            try:
+                self.analysis_thread.terminate()
+            finally:
+                self.analysis_thread = None
 
-    print("[INFO] Analisando frames com XceptionNet...")
-    ai_scores = []
-    for frame in frames:
-        ai_score = classify_frame_with_ai(model, frame)
-        ai_scores.append(ai_score)
-    avg_ai_score = np.mean(ai_scores)
+        self.log_box.clear()
+        self.result_box.clear()
+        self.result_box.hide()
+        self.progress_bar.setValue(0)
+        self.select_button.setEnabled(False)
+        self.analyze_button.setEnabled(False)
 
-    print("\n--- RESULTADO DA ANÁLISE ---")
-    print(f"Problemas faciais detectados: {face_data['face_issues']}")
-    print(f"Piscadelas detectadas: {face_data['blink_count']}")
-    print(f"Nitidez média (quanto maior, mais nítido): {avg_blur:.2f}")
-    print(f"Média de jitter entre frames: {avg_jitter:.2f}")
-    print(f"Média de frequência (FFT): {avg_fft:.2f}")
-    print(f"Média de probabilidade de IA (por frame): {avg_ai_score * 100:.2f}%")
+        self.analysis_thread = AnalysisThread(self.video_path, self.analyze_func)
+        self.analysis_thread.finished.connect(self.show_result)
+        self.analysis_thread.error.connect(self.show_error)
+        self.analysis_thread.log.connect(self.update_log)
+        self.analysis_thread.start()
 
-    score = 0
-    if face_data['face_issues'] > 5:
-        score += 2
-    if face_data['blink_count'] < 2:
-        score += 1
-    if avg_blur < 100:
-        score += 1
-    if avg_jitter > 10:
-        score += 1
-    if avg_fft > 200:
-        score += 1
-    if avg_ai_score > 0.6:
-        score += 2
+    def update_log(self, message):
+        cursor = self.log_box.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(message + "\n")
+        self.log_box.setTextCursor(cursor)
+        self.log_box.ensureCursorVisible()
 
-    # Analisar metadados
-    meta_text = json.dumps(metadata).lower()
-    ai_keywords = ["google", "lavf", "ai", "synthetic", "fake"]
-    found_keywords = [kw for kw in ai_keywords if kw in meta_text]
+        if "Processando IA" in message:
+            try:
+                frame_num = int(message.split("Frame ")[1].split("/")[0])
+                total_frames = int(message.split("/")[1].split(")")[0])
+                progress = int((frame_num / total_frames) * 100)
+                self.progress_bar.setValue(progress)
+            except Exception:
+                pass
 
-    if found_keywords:
-        score += 2
-        print(f"[Pista encontrada nos metadados]: {', '.join(found_keywords)}")
+    def show_result(self, result):
+        self.progress_bar.setValue(100)
+        self.log_box.hide()
+        self.result_box.show()
 
-    print(f"Pontuação total de suspeita (limiar: 4): {score}")
+        per_model_info = "\n".join([
+            f" - {r['model']}: {r['avg_ai_score']:.2f}%"
+            for r in result.get("per_model", [])
+        ])
 
-    if score >= 4:
-        print("⚠️ Resultado: Provavelmente gerado por IA")
-    else:
-        print("✅ Resultado: Provavelmente real")
+        output = (
+            f"👁️‍🗨️ RESULTADO DA ANÁLISE CONSOLIDADA\n"
+            f"{'-' * 40}\n"
+            f"Problemas faciais detectados: {result['face_issues']}\n"
+            f"Piscadelas detectadas: {result['blink_count']}\n"
+            f"Nitidez média: {result['avg_blur']:.2f}\n"
+            f"Tremores médios: {result['avg_jitter']:.2f}\n"
+            f"Média de frequência (FFT): {result['avg_fft']:.2f}\n"
+            f"Média de probabilidade de IA: {result['avg_ai_score']:.2f}%\n"
+            f"Detecção por modelo:\n{per_model_info}\n"
+            f"Palavras-chave suspeitas nos metadados: {', '.join(result['found_keywords']) if result['found_keywords'] else 'nenhuma'}\n"
+            f"Pontuação total de suspeita: {result['score']} / 7\n"
+            f"Status: {'⚠️ Provavelmente gerado por IA' if result['deepfake'] else '✅ Provavelmente real'}\n"
+            f"--- METADADOS DO VÍDEO ---\n"
+            f"{json.dumps(result['metadata'], indent=2)}"
+        )
 
-    print("\n--- METADADOS DO VÍDEO ---")
-    print(json.dumps(metadata, indent=2))
+        self.result_box.setText(output)
+        self.select_button.setEnabled(True)
+        self.analyze_button.setEnabled(True)
 
-# --------------------------
-# Função 9: Escolher vídeo localmente
-# --------------------------
+    def show_error(self, message):
+        self.progress_bar.setValue(0)
+        self.log_box.append(f"\n❌ ERRO:\n{message}")
+        self.select_button.setEnabled(True)
+        self.analyze_button.setEnabled(True)
+
+
+# Função principal para rodar a GUI
+def run_gui(analyze_func):
+    app = QApplication(sys.argv)
+    window = OlhoDeThothGUI(analyze_func)
+    window.show()
+    sys.exit(app.exec_())
+
+
 if __name__ == "__main__":
-    video_path = input("Digite o caminho completo do vídeo (ex: ./video.mp4): ").strip()
-
-    if not os.path.exists(video_path):
-        print("[ERRO] Arquivo não encontrado.")
-    else:
-        analyze_video(video_path, max_frames=30)
+    from analyse import analyze_video
+    run_gui(analyze_video)
