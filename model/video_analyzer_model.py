@@ -5,7 +5,7 @@ import subprocess
 import json
 import os
 import tensorflow as tf
-from tensorflow.keras.applications import (Xception, EfficientNetB0, InceptionV3, ResNet50)
+from tensorflow.keras.applications import Xception, EfficientNetB0, InceptionV3, ResNet50
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications.xception import preprocess_input as xception_preprocess
 from tensorflow.keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
@@ -13,10 +13,14 @@ from tensorflow.keras.applications.inception_v3 import preprocess_input as incep
 from tensorflow.keras.applications.resnet import preprocess_input as resnet_preprocess
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense
 from tensorflow.keras.models import Model
+from tensorflow.keras import backend as K
+import warnings
+import pytesseract
+from scipy.signal import find_peaks
 
-# --------------------------
-# Função 1: Obter número total de frames do vídeo
-# --------------------------
+warnings.filterwarnings('ignore')
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Pega quantos frames tem o vídeo
 def get_video_frame_count(video_path):
     ffprobe_path = os.path.join("ffmpeg", "bin", "ffprobe.exe")
     cmd = [
@@ -28,19 +32,17 @@ def get_video_frame_count(video_path):
         '-of', 'default=nw=1',
         video_path
     ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         output = result.stdout.decode()
         for line in output.splitlines():
             if "nb_read_packets" in line:
                 return int(line.split("=")[1])
     except Exception as e:
         print(f"[ERRO] Não foi possível ler quantidade de frames: {e}")
-    return 30  # fallback
+    return 30  # se der ruim, retorna 30
 
-# --------------------------
-# Função 2: Extrair frames
-# --------------------------
+# Extrai todos os frames do vídeo
 def extract_frames(video_path):
     cap = cv2.VideoCapture(video_path)
     frames = []
@@ -52,79 +54,73 @@ def extract_frames(video_path):
     cap.release()
     return frames
 
-# --------------------------
-# Função 3: Detectar faces e piscadelas
-# --------------------------
+# Detecta rosto e piscadelas
 mp_face_mesh = mp.solutions.face_mesh
-
 def detect_faces_and_micro(frames, log_callback=None):
     face_issues = 0
     blink_count = 0
+
+    def ear(olho):
+        A = abs(olho[1].y - olho[5].y)
+        B = abs(olho[2].y - olho[4].y)
+        C = abs(olho[0].x - olho[3].x)
+        return (A + B) / (2 * C)
+
     with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1) as face_mesh:
         for idx, frame in enumerate(frames):
             if log_callback:
                 log_callback(f"[INFO] Analisando rosto - Frame {idx + 1}/{len(frames)}")
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = face_mesh.process(rgb_frame)
+
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = face_mesh.process(rgb)
+
             if results.multi_face_landmarks is None:
                 face_issues += 1
             else:
-                landmarks = results.multi_face_landmarks[0].landmark
-                left_eye = [landmarks[i] for i in [386, 385, 380, 374, 368, 387]]
-                right_eye = [landmarks[i] for i in [159, 158, 153, 145, 144, 160]]
+                lms = results.multi_face_landmarks[0].landmark
+                left_eye = [lms[i] for i in [386, 385, 380, 374, 368, 387]]
+                right_eye = [lms[i] for i in [159, 158, 153, 145, 144, 160]]
 
-                def eye_aspect_ratio(eye):
-                    A = abs(eye[1].y - eye[5].y)
-                    B = abs(eye[2].y - eye[4].y)
-                    C = abs(eye[0].x - eye[3].x)
-                    return (A + B) / (2.0 * C)
+                esq = ear(left_eye)
+                dir = ear(right_eye)
+                media = (esq + dir) / 2
 
-                ear = (eye_aspect_ratio(left_eye) + eye_aspect_ratio(right_eye)) / 2.0
-                if ear < 0.2:
+                if media < 0.2:
                     blink_count += 1
+
     return {"face_issues": face_issues, "blink_count": blink_count}
 
-# --------------------------
-# Função 4: Estimar nitidez
-# --------------------------
+# Calcula nitidez do frame
 def estimate_blurriness(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    fm = cv2.Laplacian(gray, cv2.CV_64F).var()
-    return fm
+    return cv2.Laplacian(gray, cv2.CV_64F).var()
 
-# --------------------------
-# Função 5: Jitter entre frames
-# --------------------------
+# Verifica tremor entre frames
 def detect_frame_jitter(frames, log_callback=None):
     diffs = []
     for i in range(1, len(frames)):
         if log_callback:
             log_callback(f"[INFO] Analisando tremor - Frame {i + 1}/{len(frames)}")
         diff = cv2.absdiff(frames[i], frames[i - 1])
-        mean_diff = diff.mean()
-        diffs.append(mean_diff)
+        diffs.append(diff.mean())
     return diffs
 
-# --------------------------
-# Função 6: FFT (frequência espacial)
-# --------------------------
+# Análise de frequência espacial com FFT
 def analyze_fft(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    f = np.fft.fft2(gray)
-    fshift = np.fft.fftshift(f)
-    magnitude_spectrum = 20 * np.log(np.abs(fshift))
-    mean_magnitude = np.mean(magnitude_spectrum)
-    return mean_magnitude
+    fshift = np.fft.fftshift(np.fft.fft2(gray))
+    magnitude = 20 * np.log(np.abs(fshift) + 1e-6)
+    return np.std(magnitude)
 
-# --------------------------
-# Função 7: Analisar metadados
-# --------------------------
+# Lê metadados do vídeo
 def analyze_metadata(video_path, log_callback=None):
-    if log_callback:
-        log_callback("[INFO] Lendo metadados do arquivo...")
     ffprobe_path = os.path.join("ffmpeg", "bin", "ffprobe.exe")
     if not os.path.isfile(ffprobe_path):
-        raise FileNotFoundError(f"Arquivo ffprobe não encontrado em: {ffprobe_path}")
+        raise FileNotFoundError(f"Não achei o ffprobe: {ffprobe_path}")
+
+    if log_callback:
+        log_callback("[INFO] Lendo metadados...")
+
     cmd = [
         ffprobe_path,
         '-v', 'quiet',
@@ -133,90 +129,147 @@ def analyze_metadata(video_path, log_callback=None):
         '-show_streams',
         video_path
     ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
-        metadata = json.loads(result.stdout)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE)
+        return json.loads(result.stdout)
     except json.JSONDecodeError:
         if log_callback:
-            log_callback("[ERRO] Não foi possível ler os metadados do vídeo.")
-        metadata = {}
-    return metadata
+            log_callback("[ERRO] Não consegui ler metadados.")
+        return {}
 
-# --------------------------
-# Função 8: Carregar modelo treinado
-# --------------------------
-def load_model(model_name, log_callback=None):
-    preprocess = None
-    if model_name == "Xception":
-        base_model = Xception(weights='imagenet', include_top=False)
-        preprocess = xception_preprocess
-    elif model_name == "EfficientNet":
-        base_model = EfficientNetB0(weights='imagenet', include_top=False)
-        preprocess = efficientnet_preprocess
-    elif model_name == "Inception":
-        base_model = InceptionV3(weights='imagenet', include_top=False)
-        preprocess = inception_preprocess
-    elif model_name == "ResNet":
-        base_model = ResNet50(weights='imagenet', include_top=False)
-        preprocess = resnet_preprocess
-    else:
-        raise ValueError(f"Modelo desconhecido: {model_name}")
-    x = GlobalAveragePooling2D()(base_model.output)
-    predictions = Dense(2, activation='softmax')(x)
-    model = Model(inputs=base_model.input, outputs=predictions)
-    return model, preprocess
-
-# Classificar frame com modelo escolhido
-def classify_frame_with_ai(model, frame, preprocess_func):
-    img = cv2.resize(frame, (299, 299))
-    img_array = image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0)
-    img_array = preprocess_func(img_array)
-    prediction = model.predict(img_array, verbose=0)
-    fake_prob = prediction[0][1]
-    return fake_prob
-
-# --------------------------
-# Função 9: Análise individual com um modelo
-# --------------------------
-def analyze_with_single_model(video_path, log_callback=None, model_type="Xception", total_frames=0, progress_callback=None):
-    frames = extract_frames(video_path)
-    model, preprocess = load_model(model_type, log_callback)
-    ai_scores = []
-    for i, frame in enumerate(frames):
-        ai_score = classify_frame_with_ai(model, frame, preprocess)
-        ai_scores.append(ai_score)
-        if log_callback and i % 5 == 0:
-            log_callback(f"[INFO] [{model_type}] Processando IA - Frame {i + 1}/{len(frames)}")
-        if progress_callback and total_frames > 0:
-            progress_callback(int((i + 1) / total_frames * 100))
-    avg_ai_score = np.mean(ai_scores)
-    return {
-        "model": model_type,
-        "avg_ai_score": avg_ai_score
+# Carrega modelo específico
+def load_model(model_name):
+    modelos = {
+        "Xception": (Xception, xception_preprocess),
+        "EfficientNet": (EfficientNetB0, efficientnet_preprocess),
+        "Inception": (InceptionV3, inception_preprocess),
+        "ResNet": (ResNet50, resnet_preprocess)
     }
 
-# --------------------------
-# Função principal para análise (agora usa apenas o modelo selecionado)
-# --------------------------
+    if model_name not in modelos:
+        raise ValueError(f"Modelo desconhecido: {model_name}")
+
+    base_model, preprocess = modelos[model_name]
+    base = base_model(weights='imagenet', include_top=False)
+    x = GlobalAveragePooling2D()(base.output)
+    output = Dense(2, activation='softmax')(x)
+    model = Model(inputs=base.input, outputs=output)
+    return model, preprocess
+
+# Classifica frame com ROI facial
+def classify_frame_with_ai(model, frame, preprocess_func):
+    with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1) as face_mesh:
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = face_mesh.process(rgb)
+        if not results.multi_face_landmarks:
+            return None
+        h, w, _ = frame.shape
+        lms = results.multi_face_landmarks[0].landmark
+        x_min = min(int(l.x * w) for l in lms)
+        x_max = max(int(l.x * w) for l in lms)
+        y_min = min(int(l.y * h) for l in lms)
+        y_max = max(int(l.y * h) for l in lms)
+        roi = frame[y_min:y_max, x_min:x_max]
+        img = cv2.resize(roi, (299, 299))
+        arr = image.img_to_array(img)
+        arr = np.expand_dims(arr, axis=0)
+        arr = preprocess_func(arr)
+        prediction = model.predict(arr, verbose=0)
+        return prediction[0][1]
+    return None
+
+# Analisa com só um modelo (pra não dar pau na memória)
+def analyze_with_single_model(video_path, model_type="Xception", log_callback=None, total_frames=0, progress_callback=None):
+    model, preprocess = load_model(model_type)
+    ai_scores = []
+    frames = extract_frames(video_path)
+    for i, frame in enumerate(frames):
+        score = classify_frame_with_ai(model, frame, preprocess)
+        if score is not None:
+            ai_scores.append(score)
+        if log_callback and i % 5 == 0:
+            log_callback(f"[INFO] [{model_type}] Processando IA - Frame {i + 1}/{len(frames)}")
+        if progress_callback:
+            progress_callback(int((i + 1) / total_frames * 100))
+    avg_score = np.mean(ai_scores) if ai_scores else 0
+    K.clear_session()
+    return {"model": model_type, "avg_ai_score": avg_score}
+
+# Detecção de respiração natural (movimento mandibular/pescoço)
+def detect_natural_breathing(frames, log_callback=None):
+    neck_movement = []
+    with mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1) as face_mesh:
+        for idx, frame in enumerate(frames):
+            if log_callback:
+                log_callback(f"[INFO] Analisando respiração - Frame {idx + 1}/{len(frames)}")
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = face_mesh.process(rgb)
+            if results.multi_face_landmarks:
+                lms = results.multi_face_landmarks[0].landmark
+                # Pontos do queixo e pescoço
+                chin_y = lms[152].y
+                neck_y = lms[12].y  # Exemplo aproximado
+                movement = abs(chin_y - neck_y)
+                neck_movement.append(movement)
+    if len(neck_movement) < 10:
+        return False
+    peaks, _ = find_peaks(neck_movement, height=np.mean(neck_movement)+0.01, distance=10)
+    return len(peaks) >= 3
+
+# OCR para detectar marcas d'água invisíveis
+def detect_watermark_ocr(frames, log_callback=None):
+    detected_text = set()
+    for idx, frame in enumerate(frames):
+        if log_callback and idx % 10 == 0:
+            log_callback(f"[INFO] Buscando marca d'água - Frame {idx + 1}/{len(frames)}")
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY)
+        text = pytesseract.image_to_string(thresh, config='--psm 6')
+        if text.strip():
+            detected_text.add(text.strip())
+    return list(detected_text)
+
+# Função principal de análise
 def analyze_video(video_path, log_callback=None, progress_callback=None, model_type="Xception"):
     frames = extract_frames(video_path)
     if log_callback:
-        log_callback(f"[INFO] Extraídos {len(frames)} frames.")
+        log_callback(f"[INFO] Frames extraídos: {len(frames)}")
 
+    # Análise facial
     face_data = detect_faces_and_micro(frames, log_callback)
-    blur_scores = [estimate_blurriness(frame) for frame in frames]
-    jitter_scores = detect_frame_jitter(frames, log_callback)
-    fft_scores = [analyze_fft(frame) for frame in frames]
-    metadata = analyze_metadata(video_path, log_callback)
 
+    # Nitidez
+    blur_scores = [estimate_blurriness(f) for f in frames]
     avg_blur = np.mean(blur_scores)
+
+    # Tremores
+    jitter_scores = detect_frame_jitter(frames, log_callback)
     avg_jitter = np.mean(jitter_scores) if jitter_scores else 0
+
+    # Frequências
+    fft_scores = [analyze_fft(f) for f in frames]
     avg_fft = np.mean(fft_scores)
 
-    result = analyze_with_single_model(video_path, log_callback, model_type=model_type, total_frames=len(frames), progress_callback=progress_callback)
+    # Respiração
+    has_natural_breathing = detect_natural_breathing(frames, log_callback)
+
+    # OCR
+    watermark_texts = detect_watermark_ocr(frames, log_callback)
+
+    # Metadados
+    metadata = analyze_metadata(video_path, log_callback)
+
+    # Usa só um modelo pra não lotar RAM
+    result = analyze_with_single_model(
+        video_path,
+        model_type=model_type,
+        log_callback=log_callback,
+        total_frames=len(frames),
+        progress_callback=progress_callback
+    )
     avg_ai_score = result["avg_ai_score"]
 
+    # Pontuação final
     score = 0
     if face_data['face_issues'] > 5:
         score += 1
@@ -230,55 +283,16 @@ def analyze_video(video_path, log_callback=None, progress_callback=None, model_t
         score += 0.5
     if avg_ai_score > 0.6:
         score += 1.5
+    if not has_natural_breathing:
+        score += 1
+    if watermark_texts:
+        score += 0.5
 
     meta_text = json.dumps(metadata).lower()
     ai_keywords = [
-    # Ferramentas de IA e deepfake conhecidas
-    "deepfacelab", "faceswap", "deepfake", "synthetic", "fake", "ai", "artificial",
-    "generated", "gan", "neural", "machine learning", "ml", "deep learning",
-    "facefusion", "roop", "simswap", "first order motion", "fomm", "wav2lip",
-    "avatarify", "zao", "reface", "myheritage", "wombo", "synthesia", "d-id",
-    "deep nostalgia", "deepware", "sensity", "deepnude", "deepfakes_app",
-    
-    # Modelos e frameworks
-    "stylegan", "stylegan2", "stylegan3", "nvidia", "tensorflow", "pytorch",
-    "keras", "gan", "vae", "diffusion", "stable diffusion", "midjourney",
-    "dall-e", "openai", "meta", "google", "anthropic", "runway",
-    
-    # Codecs e encoders comuns em deepfakes
-    "lavf", "ffmpeg", "x264", "libx264", "libx265", "nvenc", "h264_nvenc",
-    "hevc_nvenc", "cuda", "opencl", "vapoursynth", "avisynth",
-    
-    # Softwares de edição usados
-    "after effects", "premiere", "davinci", "vegas", "hitfilm", "nuke",
-    "fusion", "blender", "maya", "3ds max", "cinema 4d", "houdini",
-    
-    # Indicadores de processamento
-    "processed", "edited", "modified", "enhanced", "upscaled", "interpolated",
-    "morphed", "swapped", "replaced", "manipulated", "altered", "composite",
-    "reconstruction", "synthesis", "render", "cgi", "vfx", "post-production",
-    
-    # Termos específicos de deepfake
-    "face swap", "face replacement", "facial reenactment", "lip sync",
-    "voice clone", "voice synthesis", "tts", "text to speech", "voice conversion",
-    "expression transfer", "motion transfer", "puppet", "driving video",
-    
-    # Empresas e serviços
-    "hugging face", "replicate", "colab", "kaggle", "paperspace", "vast.ai",
-    "lambda labs", "azure", "aws", "gcp", "alibaba cloud", "tencent",
-    
-    # Formatos e metadados suspeitos
-    "no exif", "stripped", "anonymous", "unknown encoder", "custom encoder",
-    "experimental", "beta", "alpha", "test", "demo", "sample", "example",
-    
-    # Indicadores temporais
-    "2023", "2024", "2025", "recent", "latest", "new", "v2", "v3", "version",
-    
-    # Outros termos relevantes
-    "virtual", "avatar", "digital human", "metahuman", "unreal", "unity",
-    "realtime", "real-time", "live", "stream", "broadcast", "simulation",
-    "emulation", "impersonation", "forgery", "counterfeit", "fabricated"
-]
+        "deepfake", "synthetic", "fake", "ai", "generated", "gan", "neural",
+        "stylegan", "ffmpeg", "lavf", "google", "ai", "fake", "gerado"
+    ]
     found_keywords = [kw for kw in ai_keywords if kw in meta_text]
     if found_keywords:
         score += 1
@@ -289,10 +303,12 @@ def analyze_video(video_path, log_callback=None, progress_callback=None, model_t
         "avg_blur": avg_blur,
         "avg_jitter": avg_jitter,
         "avg_fft": avg_fft,
+        "has_natural_breathing": has_natural_breathing,
+        "watermark_texts": watermark_texts,
         "avg_ai_score": avg_ai_score * 100,
         "score": score,
         "found_keywords": found_keywords,
-        "deepfake": score >= 3.5,
+        "deepfake": score >= 3.5 or avg_ai_score > 0.7,
         "metadata": metadata,
         "per_model": [result]
     }
