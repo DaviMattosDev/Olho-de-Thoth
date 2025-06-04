@@ -118,6 +118,12 @@ class AppController:
             for r in result.get("per_model", [])
         ])
 
+        # Verifica se foi detectada respiração natural
+        breathing_status = "✅ Respiração natural detectada" if result["has_natural_breathing"] else "❌ Respiração natural NÃO detectada"
+
+        # Mostra apenas 'Possui' ou 'Não Possui' para marcas d'água (Posteriormente terá um novo espaço para comentários)
+        watermark_text = "✅ Possui" if result["watermark_texts"] else "❌ Não Possui"
+
         # Monta o texto do relatório final
         output = (
             f"👁️‍🗨️ RESULTADO DA ANÁLISE\n"
@@ -127,10 +133,12 @@ class AppController:
             f"Nitidez média: {result['avg_blur']:.2f}\n"
             f"Tremores médios: {result['avg_jitter']:.2f}\n"
             f"Média de frequência (FFT): {result['avg_fft']:.2f}\n"
+            f"{breathing_status}\n"
+            f"Marca(s) d'água detectada(s): {watermark_text}\n"
             f"Probabilidade média de IA: {result['avg_ai_score']:.2f}%\n"
             f"Detecção por modelo:\n{per_model_info}\n"
             f"Palavras-chave suspeitas: {', '.join(result['found_keywords']) if result['found_keywords'] else 'nenhuma'}\n"
-            f"Pontuação final: {result['score']} / 7\n"
+            f"Pontuação final: {result['score']} / 8\n"
             f"Status: {'⚠️ Provavelmente gerado por IA' if result['deepfake'] else '✅ Provavelmente real'}\n"
             f"--- METADADOS ---\n{json.dumps(result['metadata'], indent=2)}"
         )
