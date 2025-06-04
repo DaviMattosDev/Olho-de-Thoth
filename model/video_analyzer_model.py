@@ -13,9 +13,6 @@ from tensorflow.keras.applications.inception_v3 import preprocess_input as incep
 from tensorflow.keras.applications.resnet import preprocess_input as resnet_preprocess
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense
 from tensorflow.keras.models import Model
-import warnings
-
-warnings.filterwarnings('ignore')
 
 # --------------------------
 # Função 1: Obter número total de frames do vídeo
@@ -42,25 +39,24 @@ def get_video_frame_count(video_path):
     return 30  # fallback
 
 # --------------------------
-# Função 2: Extrair frames (agora com todos)
+# Função 2: Extrair frames
 # --------------------------
 def extract_frames(video_path):
     cap = cv2.VideoCapture(video_path)
     frames = []
-    count = 0
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
         frames.append(frame)
-        count += 1
     cap.release()
     return frames
 
 # --------------------------
-# Função 3: Detectar faces e piscadas
+# Função 3: Detectar faces e piscadelas
 # --------------------------
 mp_face_mesh = mp.solutions.face_mesh
+
 def detect_faces_and_micro(frames, log_callback=None):
     face_issues = 0
     blink_count = 0
@@ -183,7 +179,7 @@ def classify_frame_with_ai(model, frame, preprocess_func):
 # --------------------------
 # Função 9: Análise individual com um modelo
 # --------------------------
-def analyze_with_single_model(video_path, log_callback=None, model_type="Xception"):
+def analyze_with_single_model(video_path, log_callback=None, model_type="Xception", total_frames=0, progress_callback=None):
     frames = extract_frames(video_path)
     model, preprocess = load_model(model_type, log_callback)
     ai_scores = []
@@ -192,6 +188,8 @@ def analyze_with_single_model(video_path, log_callback=None, model_type="Xceptio
         ai_scores.append(ai_score)
         if log_callback and i % 5 == 0:
             log_callback(f"[INFO] [{model_type}] Processando IA - Frame {i + 1}/{len(frames)}")
+        if progress_callback and total_frames > 0:
+            progress_callback(int((i + 1) / total_frames * 100))
     avg_ai_score = np.mean(ai_scores)
     return {
         "model": model_type,
@@ -199,11 +197,9 @@ def analyze_with_single_model(video_path, log_callback=None, model_type="Xceptio
     }
 
 # --------------------------
-# Função 10: Análise completa com todos os modelos
+# Função principal para análise (agora usa apenas o modelo selecionado)
 # --------------------------
-def analyze_with_all_models(video_path, log_callback=None):
-    all_results = []
-    models = ["Xception", "EfficientNet", "Inception", "ResNet"]
+def analyze_video(video_path, log_callback=None, progress_callback=None, model_type="Xception"):
     frames = extract_frames(video_path)
     if log_callback:
         log_callback(f"[INFO] Extraídos {len(frames)} frames.")
@@ -218,33 +214,28 @@ def analyze_with_all_models(video_path, log_callback=None):
     avg_jitter = np.mean(jitter_scores) if jitter_scores else 0
     avg_fft = np.mean(fft_scores)
 
-    ai_scores = []
-    for model_type in models:
-        result = analyze_with_single_model(video_path, log_callback, model_type)
-        ai_scores.append(result["avg_ai_score"])
-        all_results.append(result)
-
-    avg_ai_score = np.mean(ai_scores)
+    result = analyze_with_single_model(video_path, log_callback, model_type=model_type, total_frames=len(frames), progress_callback=progress_callback)
+    avg_ai_score = result["avg_ai_score"]
 
     score = 0
     if face_data['face_issues'] > 5:
-        score += 2
+        score += 1
     if face_data['blink_count'] < 2:
-        score += 1
+        score += 0.5
     if avg_blur < 100:
-        score += 1
+        score += 0.5
     if avg_jitter > 10:
-        score += 1
+        score += 0.5
     if avg_fft > 200:
-        score += 1
+        score += 0.5
     if avg_ai_score > 0.6:
-        score += 2
+        score += 1.5
 
     meta_text = json.dumps(metadata).lower()
     ai_keywords = ["google", "lavf", "ai", "synthetic", "fake"]
     found_keywords = [kw for kw in ai_keywords if kw in meta_text]
     if found_keywords:
-        score += 2
+        score += 1
 
     return {
         "face_issues": face_data['face_issues'],
@@ -255,13 +246,7 @@ def analyze_with_all_models(video_path, log_callback=None):
         "avg_ai_score": avg_ai_score * 100,
         "score": score,
         "found_keywords": found_keywords,
-        "deepfake": score >= 4,
+        "deepfake": score >= 3.5,
         "metadata": metadata,
-        "per_model": all_results
+        "per_model": [result]
     }
-
-# --------------------------
-# Função principal para análise
-# --------------------------
-def analyze_video(video_path, log_callback=None):
-    return analyze_with_all_models(video_path, log_callback)

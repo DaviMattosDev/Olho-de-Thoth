@@ -4,3 +4,4 @@ mediapipe==0.10.13
 tensorflow
 ffmpeg-python
 requests
+pyqt5
