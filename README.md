@@ -83,7 +83,7 @@ pip install opencv-python numpy mediapipe tensorflow pytesseract pillow scikit-l
 Clone o repositório:
 
 ```bash
-git clone https://github.com/seu-usuario/Olho-de-Thoth.git
+git clone https://github.com/DaviMattosDev/Olho-de-Thoth.git
 cd Olho-de-Thoth
 ```
 
