@@ -5,9 +5,7 @@ import subprocess
 import json
 import os
 import tensorflow as tf
-from tensorflow.keras.applications import (
-    Xception, EfficientNetB0, InceptionV3, ResNet50
-)
+from tensorflow.keras.applications import (Xception, EfficientNetB0, InceptionV3, ResNet50)
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications.xception import preprocess_input as xception_preprocess
 from tensorflow.keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
@@ -43,13 +41,11 @@ def get_video_frame_count(video_path):
         print(f"[ERRO] Não foi possível ler quantidade de frames: {e}")
     return 30  # fallback
 
-
 # --------------------------
 # Função 2: Extrair frames (agora com todos)
 # --------------------------
-def extract_frames(video_path, max_frames=None):
+def extract_frames(video_path):
     cap = cv2.VideoCapture(video_path)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frames = []
     count = 0
     while cap.isOpened():
@@ -60,7 +56,6 @@ def extract_frames(video_path, max_frames=None):
         count += 1
     cap.release()
     return frames
-
 
 # --------------------------
 # Função 3: Detectar faces e piscadas
@@ -93,7 +88,6 @@ def detect_faces_and_micro(frames, log_callback=None):
                     blink_count += 1
     return {"face_issues": face_issues, "blink_count": blink_count}
 
-
 # --------------------------
 # Função 4: Estimar nitidez
 # --------------------------
@@ -101,7 +95,6 @@ def estimate_blurriness(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     fm = cv2.Laplacian(gray, cv2.CV_64F).var()
     return fm
-
 
 # --------------------------
 # Função 5: Jitter entre frames
@@ -116,7 +109,6 @@ def detect_frame_jitter(frames, log_callback=None):
         diffs.append(mean_diff)
     return diffs
 
-
 # --------------------------
 # Função 6: FFT (frequência espacial)
 # --------------------------
@@ -127,7 +119,6 @@ def analyze_fft(image):
     magnitude_spectrum = 20 * np.log(np.abs(fshift))
     mean_magnitude = np.mean(magnitude_spectrum)
     return mean_magnitude
-
 
 # --------------------------
 # Função 7: Analisar metadados
@@ -155,7 +146,6 @@ def analyze_metadata(video_path, log_callback=None):
         metadata = {}
     return metadata
 
-
 # --------------------------
 # Função 8: Carregar modelo treinado
 # --------------------------
@@ -180,7 +170,6 @@ def load_model(model_name, log_callback=None):
     model = Model(inputs=base_model.input, outputs=predictions)
     return model, preprocess
 
-
 # Classificar frame com modelo escolhido
 def classify_frame_with_ai(model, frame, preprocess_func):
     img = cv2.resize(frame, (299, 299))
@@ -190,7 +179,6 @@ def classify_frame_with_ai(model, frame, preprocess_func):
     prediction = model.predict(img_array, verbose=0)
     fake_prob = prediction[0][1]
     return fake_prob
-
 
 # --------------------------
 # Função 9: Análise individual com um modelo
@@ -210,41 +198,26 @@ def analyze_with_single_model(video_path, log_callback=None, model_type="Xceptio
         "avg_ai_score": avg_ai_score
     }
 
-
 # --------------------------
 # Função 10: Análise completa com todos os modelos
 # --------------------------
 def analyze_with_all_models(video_path, log_callback=None):
     all_results = []
     models = ["Xception", "EfficientNet", "Inception", "ResNet"]
-    # Primeiro extrair frames apenas uma vez
-    if log_callback:
-        log_callback("[INFO] Extraindo frames do vídeo...")
     frames = extract_frames(video_path)
     if log_callback:
         log_callback(f"[INFO] Extraídos {len(frames)} frames.")
 
-    # Deteção de rostos (uma vez só)
-    if log_callback:
-        log_callback("[INFO] Analisando rostos e microcomportamentos...")
-    face_data = detect_faces_and_micro(frames)
-
-    # Nitidez média (uma vez só)
+    face_data = detect_faces_and_micro(frames, log_callback)
     blur_scores = [estimate_blurriness(frame) for frame in frames]
-    avg_blur = np.mean(blur_scores)
-
-    # Tremores (uma vez só)
-    jitter_scores = detect_frame_jitter(frames)
-    avg_jitter = np.mean(jitter_scores) if jitter_scores else 0
-
-    # Frequências (uma vez só)
+    jitter_scores = detect_frame_jitter(frames, log_callback)
     fft_scores = [analyze_fft(frame) for frame in frames]
-    avg_fft = np.mean(fft_scores)
-
-    # Metadados (uma vez só)
     metadata = analyze_metadata(video_path, log_callback)
 
-    # Agora analisa com todos os modelos
+    avg_blur = np.mean(blur_scores)
+    avg_jitter = np.mean(jitter_scores) if jitter_scores else 0
+    avg_fft = np.mean(fft_scores)
+
     ai_scores = []
     for model_type in models:
         result = analyze_with_single_model(video_path, log_callback, model_type)
@@ -253,7 +226,6 @@ def analyze_with_all_models(video_path, log_callback=None):
 
     avg_ai_score = np.mean(ai_scores)
 
-    # Decisão final com base na média dos modelos
     score = 0
     if face_data['face_issues'] > 5:
         score += 2
@@ -274,7 +246,7 @@ def analyze_with_all_models(video_path, log_callback=None):
     if found_keywords:
         score += 2
 
-    result = {
+    return {
         "face_issues": face_data['face_issues'],
         "blink_count": face_data['blink_count'],
         "avg_blur": avg_blur,
@@ -287,9 +259,9 @@ def analyze_with_all_models(video_path, log_callback=None):
         "metadata": metadata,
         "per_model": all_results
     }
-    return result
 
-
+# --------------------------
 # Função principal para análise
+# --------------------------
 def analyze_video(video_path, log_callback=None):
     return analyze_with_all_models(video_path, log_callback)

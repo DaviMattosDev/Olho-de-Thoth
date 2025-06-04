@@ -4,14 +4,15 @@ import mediapipe as mp
 import subprocess
 import json
 import os
-import requests
 import tensorflow as tf
 from tensorflow.keras.applications import Xception
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications.xception import preprocess_input
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense
 from tensorflow.keras.models import Model
+from PyQt5.QtWidgets import QApplication, QFileDialog
 import warnings
+
 warnings.filterwarnings('ignore')
 
 # --------------------------
@@ -218,12 +219,23 @@ def analyze_video(video_path, max_frames=30):
     print(json.dumps(metadata, indent=2))
 
 # --------------------------
-# Função 9: Escolher vídeo localmente
+# Função 9: Escolher vídeo via janela gráfica
 # --------------------------
 if __name__ == "__main__":
-    video_path = input("Digite o caminho completo do vídeo (ex: ./video.mp4): ").strip()
+    # Inicializa aplicação PyQt (apenas para abrir o diálogo)
+    app = QApplication(sys.argv)
 
-    if not os.path.exists(video_path):
-        print("[ERRO] Arquivo não encontrado.")
+    video_path, _ = QFileDialog.getOpenFileName(
+        None,
+        "Selecione o vídeo para análise",
+        "",
+        "Vídeos (*.mp4 *.avi *.mov *.mkv)"
+    )
+
+    if video_path:
+        if not os.path.exists(video_path):
+            print("[ERRO] Arquivo não encontrado.")
+        else:
+            analyze_video(video_path, max_frames=30)
     else:
-        analyze_video(video_path, max_frames=30)
+        print("[INFO] Nenhum vídeo selecionado. Encerrando...")
