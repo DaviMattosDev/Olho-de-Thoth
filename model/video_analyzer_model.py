@@ -232,7 +232,53 @@ def analyze_video(video_path, log_callback=None, progress_callback=None, model_t
         score += 1.5
 
     meta_text = json.dumps(metadata).lower()
-    ai_keywords = ["google", "lavf", "ai", "synthetic", "fake"]
+    ai_keywords = [
+    # Ferramentas de IA e deepfake conhecidas
+    "deepfacelab", "faceswap", "deepfake", "synthetic", "fake", "ai", "artificial",
+    "generated", "gan", "neural", "machine learning", "ml", "deep learning",
+    "facefusion", "roop", "simswap", "first order motion", "fomm", "wav2lip",
+    "avatarify", "zao", "reface", "myheritage", "wombo", "synthesia", "d-id",
+    "deep nostalgia", "deepware", "sensity", "deepnude", "deepfakes_app",
+    
+    # Modelos e frameworks
+    "stylegan", "stylegan2", "stylegan3", "nvidia", "tensorflow", "pytorch",
+    "keras", "gan", "vae", "diffusion", "stable diffusion", "midjourney",
+    "dall-e", "openai", "meta", "google", "anthropic", "runway",
+    
+    # Codecs e encoders comuns em deepfakes
+    "lavf", "ffmpeg", "x264", "libx264", "libx265", "nvenc", "h264_nvenc",
+    "hevc_nvenc", "cuda", "opencl", "vapoursynth", "avisynth",
+    
+    # Softwares de edição usados
+    "after effects", "premiere", "davinci", "vegas", "hitfilm", "nuke",
+    "fusion", "blender", "maya", "3ds max", "cinema 4d", "houdini",
+    
+    # Indicadores de processamento
+    "processed", "edited", "modified", "enhanced", "upscaled", "interpolated",
+    "morphed", "swapped", "replaced", "manipulated", "altered", "composite",
+    "reconstruction", "synthesis", "render", "cgi", "vfx", "post-production",
+    
+    # Termos específicos de deepfake
+    "face swap", "face replacement", "facial reenactment", "lip sync",
+    "voice clone", "voice synthesis", "tts", "text to speech", "voice conversion",
+    "expression transfer", "motion transfer", "puppet", "driving video",
+    
+    # Empresas e serviços
+    "hugging face", "replicate", "colab", "kaggle", "paperspace", "vast.ai",
+    "lambda labs", "azure", "aws", "gcp", "alibaba cloud", "tencent",
+    
+    # Formatos e metadados suspeitos
+    "no exif", "stripped", "anonymous", "unknown encoder", "custom encoder",
+    "experimental", "beta", "alpha", "test", "demo", "sample", "example",
+    
+    # Indicadores temporais
+    "2023", "2024", "2025", "recent", "latest", "new", "v2", "v3", "version",
+    
+    # Outros termos relevantes
+    "virtual", "avatar", "digital human", "metahuman", "unreal", "unity",
+    "realtime", "real-time", "live", "stream", "broadcast", "simulation",
+    "emulation", "impersonation", "forgery", "counterfeit", "fabricated"
+]
     found_keywords = [kw for kw in ai_keywords if kw in meta_text]
     if found_keywords:
         score += 1

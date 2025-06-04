@@ -1,4 +1,7 @@
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QLabel, QTextEdit,QVBoxLayout, QWidget, QFileDialog, QHBoxLayout, QProgressBar, QComboBox)
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QPushButton, QLabel, QTextEdit,
+    QVBoxLayout, QWidget, QFileDialog, QHBoxLayout, QProgressBar, QComboBox
+)
 from PyQt5.QtGui import QColor, QTextCharFormat, QSyntaxHighlighter
 from PyQt5.QtCore import Qt
 
@@ -74,7 +77,7 @@ class OlhoDeThothGUI(QMainWindow):
         layout.addWidget(subtitle)
 
         # Seção de seleção de modelo
-        model_title = QLabel("🧠 Escolha o Modelo de Análise com IA")
+        model_title = QLabel("🧠 Escolha o Modelo de Inteligência Artificial")
         model_title.setAlignment(Qt.AlignCenter)
         model_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #d9dcd6; margin-top: 20px;")
         layout.addWidget(model_title)
@@ -107,8 +110,9 @@ class OlhoDeThothGUI(QMainWindow):
         btn_layout = QHBoxLayout()
         self.select_button = QPushButton("📂 Selecionar Vídeo")
         self.analyze_button = QPushButton("🔍 Iniciar Análise")
+        self.clear_button = QPushButton("🧹 Limpar Log e Análise")
 
-        for btn in [self.select_button, self.analyze_button]:
+        for btn in [self.select_button, self.analyze_button, self.clear_button]:
             btn.setStyleSheet("""
                 QPushButton {
                     background-color: #5a2a7c;
@@ -125,6 +129,7 @@ class OlhoDeThothGUI(QMainWindow):
 
         btn_layout.addWidget(self.select_button)
         btn_layout.addWidget(self.analyze_button)
+        btn_layout.addWidget(self.clear_button)
         layout.addLayout(btn_layout)
 
         # Caminho do vídeo selecionado
@@ -185,12 +190,27 @@ class OlhoDeThothGUI(QMainWindow):
             border: 1px solid #444;
         """)
         self.highlighter = JsonHighlighter(self.result_box.document())
-        layout.addWidget(self.result_box)
         self.result_box.hide()
+        layout.addWidget(self.result_box)
 
         # Define widget central
         main_widget.setLayout(layout)
         self.setCentralWidget(main_widget)
+
+        # Exibe a descrição do modelo ao iniciar
+        self.update_model_description()
+
+    def update_model_description(self):
+        from model.info_model import get_model_description
+        model = self.model_combo.currentText()
+        description = get_model_description(model)
+        self.clear_log()
+        self.append_log(description)
+
+    # Limpa o log e o resultado JSON
+    def clear_analysis(self):
+        self.clear_log()
+        self.result_box.hide()
 
     # Limpa o log
     def clear_log(self):

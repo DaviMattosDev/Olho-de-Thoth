@@ -12,7 +12,7 @@ from model.info_model import get_model_description
 # Signals:
 #   - finished: Resultado final da análise (dict)
 #   - error: Emite uma mensagem de erro (str)
-#   - log: Emite mensagens para o log da interface (str)
+#   - log: Envia mensagens para o log da interface (str)
 #   - progress: Atualiza a barra de progresso (int 0-100)
 # --------------------------
 class AnalysisWorker(QThread):
@@ -23,19 +23,19 @@ class AnalysisWorker(QThread):
 
     def __init__(self, video_path, model="Xception"):
         super().__init__()
-        self.video_path = video_path  # Caminho do vídeo a ser analisado
-        self.model = model            # Modelo de IA selecionado pelo usuário
+        self.video_path = video_path  # Caminho do vídeo selecionado
+        self.model = model            # Modelo de IA escolhido pelo usuário
 
     def run(self):
         try:
-            # Executa a análise do vídeo em uma thread separada
+            # Executa a análise do vídeo na thread secundária
             result = analyze_video(
                 self.video_path,
                 log_callback=self.log.emit,         # Para atualizar o log em tempo real
                 progress_callback=self.progress.emit, # Para atualizar a barra de progresso
                 model_type=self.model               # Usando apenas o modelo selecionado
             )
-            self.finished.emit(result)  # Envia resultado final para a GUI
+            self.finished.emit(result)  # Envia o resultado final para a GUI
         except Exception as e:
             self.error.emit(str(e))    # Caso ocorra erro, envia a mensagem de erro
 
@@ -47,15 +47,16 @@ class AnalysisWorker(QThread):
 # --------------------------
 class AppController:
     def __init__(self, view):
-        self.view = view
-        self.worker = None
+        self.view = view       # Referência à interface gráfica
+        self.worker = None     # Armazena a thread de análise (QThread)
 
-        # Conecta os eventos da interface (botões, combo box etc.)
+        # Conecta os botões da interface aos métodos correspondentes
         self.view.select_button.clicked.connect(self.select_video)
         self.view.analyze_button.clicked.connect(self.start_analysis)
         self.view.model_combo.currentIndexChanged.connect(self.update_model_description)
+        self.view.clear_button.clicked.connect(self.clear_analysis)  # Botão de limpar análise
 
-        # Carrega descrição inicial do modelo na inicialização
+        # Carrega descrição inicial do modelo ao iniciar o app
         self.update_model_description()
 
     # --------------------------
@@ -63,10 +64,10 @@ class AppController:
     # Descrição: Atualiza o log com a descrição do modelo selecionado
     # --------------------------
     def update_model_description(self):
-        model = self.view.model_combo.currentText()
-        description = get_model_description(model)
+        model = self.view.model_combo.currentText()      # Pega o nome do modelo selecionado
+        description = get_model_description(model)       # Busca a descrição do info_model
         self.view.clear_log()
-        self.view.append_log(description)
+        self.view.append_log(description)                # Exibe no log da interface
 
     # --------------------------
     # Método: select_video
@@ -89,9 +90,9 @@ class AppController:
     # Descrição: Inicia a análise em uma thread separada
     # --------------------------
     def start_analysis(self):
-        self.view.clear_log()
-        self.view.result_box.hide()
-        self.view.progress_bar.setValue(0)
+        self.view.clear_log()                    # Limpa o log antes de começar
+        self.view.result_box.hide()             # Esconde o resultado anterior
+        self.view.progress_bar.setValue(0)      # Reseta a barra de progresso
         self.view.select_button.setEnabled(False)
         self.view.analyze_button.setEnabled(False)
 
@@ -150,3 +151,10 @@ class AppController:
     def handle_error(self, error_msg):
         self.view.append_log(f"\n❌ ERRO:\n{error_msg}")
         self.view.select_button.setEnabled(True)
+
+    # --------------------------
+    # Método: clear_analysis
+    # Descrição: Limpa o log e oculta o resultado JSON
+    # --------------------------
+    def clear_analysis(self):
+        self.view.clear_analysis()  # Chama o método da GUI para limpar análise
