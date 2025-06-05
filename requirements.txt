@@ -5,3 +5,4 @@ tensorflow
 ffmpeg-python
 requests
 pyqt5
+pytesseract
