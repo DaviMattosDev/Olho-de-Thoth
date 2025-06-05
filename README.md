@@ -68,7 +68,7 @@ O sistema foi projetado para ser modular, permitindo a adição de novos modelos
 Para rodar localmente:
 
 ```bash
-pip install opencv-python numpy mediapipe tensorflow pytesseract pillow scikit-learn scipy
+pip install opencv-python numpy mediapipe==0.10.13 tensorflow pytesseract pillow scikit-learn scipy
 ```
 
 💡 **No Windows, instale também:**
