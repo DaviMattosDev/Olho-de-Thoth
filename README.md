@@ -75,7 +75,7 @@ pip install opencv-python numpy mediapipe tensorflow pytesseract pillow scikit-l
 
 - **Tesseract OCR:** [Baixe aqui](https://github.com/tesseract-ocr/tesseract)  
 - **FFmpeg:** [Baixe aqui](https://ffmpeg.org/) e adicione ao **PATH**
-
+> Os arquivos estão na pasta *recursos necessários* junto com o *tutorial.txt*
 ---
 
 ## 🚀 Como usar
