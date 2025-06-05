@@ -1,0 +1,2 @@
+1. Só extrair na pasta central do Olho-de-Toth o ffmpeg.zip
+2. Baixar o tesseract-ocr-w64-setup-5.5.0.20241111 / depois de instalar verificar se está no C:\Program Files\Tesseract-OCR\tesseract.exe 
