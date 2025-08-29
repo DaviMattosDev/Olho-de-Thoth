@@ -1,0 +1,31 @@
+{
+  "scoring": {
+    "deepfake_threshold": 3.5,
+    "ai_score_threshold": 0.7,
+    "weights": {
+      "face_issues": 1.0,
+      "blink_count": 0.5,
+      "blurriness": 0.5,
+      "jitter": 0.5,
+      "fft": 0.5,
+      "ai_model": 1.5,
+      "natural_breathing": 1.0,
+      "watermark": 0.5,
+      "metadata_keywords": 1.0
+    }
+  },
+  "thresholds": {
+    "face_issues_max": 5,
+    "blink_count_min": 2,
+    "blurriness_max": 100.0,
+    "jitter_min": 10.0,
+    "fft_min": 200.0,
+    "ai_model_min": 0.6
+  },
+  "metadata": {
+    "ai_keywords": [
+      "deepfake", "synthetic", "fake", "ai", "generated", "gan", "neural",
+      "stylegan", "ffmpeg", "lavf", "google", "gerado"
+    ]
+  }
+}
